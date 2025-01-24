@@ -1,15 +1,11 @@
-import time
 import telebot
 import os
 import requests
 import re
-from telebot import types
-from io import BytesIO
 import pandas as pd
+from telebot import types
 
 bot = telebot.TeleBot('7174452154:AAGVz3XEPWC2nuLqhOxAg_umUbjI9q6Ehns')
-
-bot.remove_webhook()
 
 uploaded_file_path = None
 df = None
@@ -26,7 +22,7 @@ def start(message):
         f'Здравствуйте, {message.from_user.first_name}!\n\n'
         'Я бот, который поможет вам подсчитать количество проведенных пар для вашей группы по дисциплинам.\n\n'
         'Вот что вы можете сделать с моей помощью:\n\n'
-        '1. **Загрузить файл с расписанием** — загрузите файл с данными о количестве пар по дисциплинам для вашей группы.\n'
+        '1. **Загрузить файл с расписанием** — загрузите файл с данными о количестве пар по дисциплинам.\n'
         '2. **Просмотреть количество пар по дисциплинам** — после загрузки файла используйте команду **/pairs**, чтобы получить список дисциплин и их количество пар.\n\n'
         'Для получения дополнительной информации, используйте команду **/help**.\n\n'
         'Пожалуйста, выберите одну из команд ниже для продолжения.'
@@ -90,6 +86,7 @@ def handle_url(message):
                     df = pd.read_excel(file_path, engine="openpyxl")
                     uploaded_file_path = file_path
                     bot.send_message(message.chat.id, f"Файл Excel загружен: {file_name}. Пример данных:\n{df.head()}")
+                    offer_column_selection(message)  # Предлагаем выбрать столбцы
                 except Exception as e:
                     bot.send_message(message.chat.id, f"Ошибка при обработке Excel файла: {e}")
                     return
@@ -127,6 +124,7 @@ def handle_document(message):
                 df = pd.read_excel(file_path, engine="openpyxl")
                 uploaded_file_path = file_path
                 bot.send_message(message.chat.id, f"Файл загружен: {sanitized_file_name}. Пример данных:\n{df.head()}")
+                offer_column_selection(message)  # Предлагаем выбрать столбцы
             except Exception as e:
                 bot.send_message(message.chat.id, f"Ошибка при обработке Excel файла: {e}")
                 return
@@ -135,27 +133,36 @@ def handle_document(message):
     except Exception as e:
         bot.send_message(message.chat.id, f"Ошибка при обработке документа: {e}")
 
-@bot.message_handler(commands=['pairs'])
-def show_pairs(message):
+def offer_column_selection(message):
+    if df is not None:
+        # Отправляем кнопки для выбора столбцов
+        subject_columns = [col for col in df.columns]  # Все столбцы без фильтрации
+        if subject_columns:
+            markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+            for column in subject_columns:
+                markup.add(types.KeyboardButton(column))
+            markup.add(types.KeyboardButton("Отмена"))
+            bot.send_message(message.chat.id, "Выберите столбец для отображения данных:", reply_markup=markup)
+        else:
+            bot.send_message(message.chat.id, "В файле нет столбцов для отображения.")
+
+@bot.message_handler(func=lambda message: message.text in df.columns)
+def show_column_data(message):
     if df is None:
         bot.send_message(message.chat.id, "Сначала загрузите файл с расписанием с помощью команды **/url** или **/file**.")
         return
 
-    group_name = "Название вашей группы"  # Замените на реальное имя группы или запросите у пользователя
+    column_name = message.text
 
-    group_data = df[df['Группа'] == group_name]
-    if group_data.empty:
-        bot.send_message(message.chat.id, f"Не найдено данных для группы {group_name}.")
+    if column_name == "Отмена":
+        bot.send_message(message.chat.id, "Отмена выбора.")
         return
 
-    subject_column_names = [col for col in df.columns if col != 'Группа']
-    result = []
+    # Выводим все данные из выбранного столбца
+    column_data = df[column_name].to_list()  # Получаем все значения в списке
+    column_data_str = "\n".join(str(item) for item in column_data)  # Преобразуем в строку
 
-    for subject in subject_column_names:
-        total_pairs = group_data[subject].sum()
-        result.append(f"{subject}: {total_pairs} пар")
-
-    bot.send_message(message.chat.id, "\n".join(result))
+    bot.send_message(message.chat.id, f"Данные для столбца {column_name}:\n{column_data_str}")
 
 @bot.message_handler(commands=['warnings'])
 def show_warnings(message):
